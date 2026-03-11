@@ -101,10 +101,13 @@
     </div>
 
     <!-- Player count -->
-    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-shrink:0;">
+   <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-shrink:0;">
       <span style="font-size:10px;color:#555;letter-spacing:2px;">PLAYERS:</span>
       <button id="btn2p" onclick="setPlayerCount(2)" style="background:#ffe600;color:#000;border:2px solid #ffe600;padding:5px 16px;font-family:'Courier New',monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:2px;">2P</button>
       <button id="btn3p" onclick="setPlayerCount(3)" style="background:#0a0a14;color:#555;border:2px solid #555;padding:5px 16px;font-family:'Courier New',monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:2px;">3P</button>
+      <button onclick="randomChar(1)" style="background:#0a0a14;color:#4fc3f7;border:2px solid #4fc3f7;padding:5px 10px;font-family:'Courier New',monospace;font-size:10px;cursor:pointer;letter-spacing:1px;">P1 🎲</button>
+      <button onclick="randomChar(2)" style="background:#0a0a14;color:#ef5350;border:2px solid #ef5350;padding:5px 10px;font-family:'Courier New',monospace;font-size:10px;cursor:pointer;letter-spacing:1px;">P2 🎲</button>
+      <button onclick="randomChar(3)" style="background:#0a0a14;color:#ffe600;border:2px solid #ffe600;padding:5px 10px;font-family:'Courier New',monospace;font-size:10px;cursor:pointer;letter-spacing:1px;">P3 🎲</button>
     </div>
 
     <!-- Preview row -->
@@ -143,6 +146,7 @@
     <!-- Lock-in status + next button -->
     <div style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-shrink:0;">
       <div id="lock-status" style="font-size:10px;color:#555;letter-spacing:2px;">Lock in your characters to continue</div>
+      <button id="botbtn" onclick="toggleBot()" style="background:#0a0a14;color:#555;border:2px solid #555;padding:12px 20px;font-family:'Courier New',monospace;font-size:13px;font-weight:bold;cursor:pointer;letter-spacing:2px;">BOT: OFF</button>
 <button id="lockbtn" onclick="lockAndNext()" style="background:linear-gradient(180deg,#2a1a00,#0a0a14);color:#ffe600;border:3px solid #ffe600;padding:12px 36px;font-family:'Courier New',monospace;font-size:15px;font-weight:bold;cursor:pointer;letter-spacing:4px;transition:all 0.1s;box-shadow:0 0 18px #ffe600, inset 0 0 8px rgba(255,230,0,0.1);text-shadow:0 0 8px #ffe600;">LOCK IN ▶</button>
     </div>
   </div>
@@ -947,7 +951,7 @@ const CHARS = PIXEL_CHARS.map((pc, charIdx) => ({
 
     if(state === 'walk') {
       const legShift = Math.round(Math.sin(t / 80) * 1.5);
-      const legStartRow = isTulip ? 23 : isGoob ? 18 : isOgre ? 15 : 14;
+      const legStartRow = isTulip ? 23 : isGoob ? 18 : isOgre ? 20 : 14;
       octx.clearRect(0, legStartRow * ps, totalW, (rows - legStartRow) * ps);
       for(let row = legStartRow; row < rows; row++) {
         const rowData = activeGrid[row];
@@ -987,6 +991,204 @@ let playerSchemes = ['kb1', 'kb2', 'gp0'];
 
 // Track which players have locked in
 let p1Locked = false, p2Locked = false, p3Locked = false;
+function randomChar(player) {
+  const idx = Math.floor(Math.random() * CHARS.length);
+  if(player === 1) p1CharIdx = idx;
+  else if(player === 2) p2CharIdx = idx;
+  else if(player === 3) p3CharIdx = idx;
+  refreshGrid();
+  updatePreviews();
+}
+// ============================================================
+// AI BOT SYSTEM
+// ============================================================
+let botEnabled = false;
+let botPlayerIndex = 1; // which player index the bot controls (0=P1, 1=P2)
+
+function toggleBot() {
+  botEnabled = !botEnabled;
+  const btn = document.getElementById('botbtn');
+  if(btn) {
+    btn.style.background = botEnabled ? '#ffe600' : '#0a0a14';
+    btn.style.color = botEnabled ? '#000' : '#555';
+    btn.style.borderColor = botEnabled ? '#ffe600' : '#555';
+    btn.textContent = botEnabled ? 'BOT: ON ✓' : 'BOT: OFF';
+  }
+  updatePreviews();
+}
+
+function updateBot() {
+  if(!botEnabled || !gameRunning) return;
+  const bot = players[botPlayerIndex];
+  if(!bot || bot.stocks <= 0) return;
+
+  // find nearest enemy
+  const enemies = players.filter((p, i) => i !== botPlayerIndex && p.stocks > 0);
+  if(enemies.length === 0) return;
+  const enemy = enemies.reduce((closest, e) =>
+    Math.hypot(e.x - bot.x, e.y - bot.y) < Math.hypot(closest.x - bot.x, closest.y - bot.y) ? e : closest
+  , enemies[0]);
+
+  const dx = enemy.x - bot.x;
+  const dy = enemy.y - bot.y;
+  const dist = Math.hypot(dx, dy);
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+
+  // clear bot keys every frame
+  const scheme = bot.controlScheme || 'kb2';
+  const keyLeft  = scheme==='kb1'?'KeyA':scheme==='kb2'?'KeyL':'GP2_LEFT';
+  const keyRight = scheme==='kb1'?'KeyD':scheme==='kb2'?'Quote':'GP2_RIGHT';
+  const keyJump  = scheme==='kb1'?'KeyW':scheme==='kb2'?'KeyP':'GP2_JUMP';
+  const keyDown  = scheme==='kb1'?'KeyS':scheme==='kb2'?'Semicolon':'GP2_DOWN';
+  const keyAtk   = scheme==='kb1'?'KeyQ':scheme==='kb2'?'KeyO':'GP2_ATTACK';
+  const keyAtk2  = scheme==='kb1'?'KeyE':scheme==='kb2'?'BracketLeft':'GP2_SPECIAL';
+  const keyR     = scheme==='kb1'?'KeyR':scheme==='kb2'?'BracketRight':'GP2_ABILITY3';
+
+  keys[keyLeft]  = false;
+  keys[keyRight] = false;
+  keys[keyJump]  = false;
+  keys[keyDown]  = false;
+  keys[keyAtk]   = false;
+  keys[keyAtk2]  = false;
+  keys[keyR]     = false;
+
+  const botFrame = frame;
+  const attackType = bot.char.attackType;
+
+  // --- SURVIVAL: if near edge, move away ---
+  const edgeMargin = canvas.width * 0.12;
+  const nearLeftEdge  = bot.x < edgeMargin;
+  const nearRightEdge = bot.x > canvas.width - edgeMargin;
+  const dangerouslyLow = bot.y > canvas.height * 0.80;
+
+  if(nearLeftEdge && bot.onGround)  { keys[keyRight] = true; }
+  if(nearRightEdge && bot.onGround) { keys[keyLeft]  = true; }
+
+  // --- JUMP to get back on platform if falling ---
+  if(!bot.onGround && bot.y > canvas.height * 0.75) {
+    if(bot.jumpsLeft > 0) keys[keyJump] = true;
+  }
+
+  // --- JUMP to reach enemy on higher platform ---
+  const enemyHigher = enemy.y < bot.y - 60;
+  if(enemyHigher && bot.onGround && absDx < 200 && botFrame % 40 < 6) {
+    keys[keyJump] = true;
+  }
+
+  // --- DODGE: if enemy projectile is incoming, jump or move away ---
+  const incomingProjectile = projectiles.find(pr => {
+    if(pr.owner === bot) return false;
+    if(pr.mudWall || pr.firewall || pr.heartBomb) return false;
+    const toBot = Math.hypot(pr.x - bot.x, pr.y - bot.y);
+    if(toBot > 280) return false;
+    // is it moving toward bot?
+    const moving = (pr.vx > 0 && pr.x < bot.x) || (pr.vx < 0 && pr.x > bot.x);
+    return moving && Math.abs(pr.y - bot.y) < 60;
+  });
+  if(incomingProjectile && bot.hitStun === 0) {
+    // jump over it or sidestep
+    if(bot.onGround && botFrame % 8 < 4) {
+      keys[keyJump] = true;
+    } else {
+      // move perpendicular — away from projectile x direction
+      if(incomingProjectile.vx > 0) keys[keyLeft] = true;
+      else keys[keyRight] = true;
+    }
+  }
+
+  // --- POSITIONING: move toward enemy ---
+  // ranged characters want to keep medium distance, melee wants to get close
+  const isRanged = (attackType === 'projectile' || attackType === 'Arch' || attackType === 'grampy' || attackType === 'goob');
+  const preferredDist = isRanged ? 280 : 90;
+  const tooFar  = absDx > preferredDist + 60;
+  const tooClose = absDx < preferredDist - 60;
+
+  if(!nearLeftEdge && !nearRightEdge && !incomingProjectile) {
+  if(dx > 0) keys[keyRight] = true;
+  else keys[keyLeft] = true;
+}
+
+  // --- PLATFORM NAVIGATION: jump gaps ---
+  // if bot is on ground and enemy is on a different platform, jump toward them
+  if(bot.onGround && !bot._botJumpCooldown && absDy > 50 && absDx < 300) {
+    if(botFrame % 60 < 5) {
+      keys[keyJump] = true;
+      bot._botJumpCooldown = 55;
+    }
+  }
+  if(bot._botJumpCooldown > 0) bot._botJumpCooldown--;
+
+  // --- JUMP over enemy if stuck at same level and close ---
+  if(bot.onGround && absDx < 50 && absDy < 30 && botFrame % 70 < 5) {
+    keys[keyJump] = true;
+  }
+
+  // --- ATTACK LOGIC based on character type ---
+  const inAttackRange = dist < 160 && absDy < 80;
+  const inMeleeRange  = dist < 110 && absDy < 70;
+  const canAttack = (bot.attackCooldown || 0) === 0 && bot.hitStun === 0 && (bot.tranced || 0) === 0;
+
+  if(canAttack) {
+    // use 3rd ability (R key) when cooldown is ready — every character
+    const abilityReady = (
+      (attackType==='tulip'      && (bot.tulipHealCD||0)===0 && bot.damage > 40) ||
+      (attackType==='grampy'     && (bot.grampsShieldCD||0)===0 && bot.damage > 30) ||
+      (attackType==='brawler'    && (bot.axelQuakeCD||0)===0) ||
+      (attackType==='icup'       && (bot.icupHeadCD||0)===0 && !bot.icupHeadActive) ||
+      (attackType==='goob'       && (bot.goobTranceCD||0)===0) ||
+      (attackType==='projectile' && (bot.rexFirewallCD||0)===0) ||
+      (attackType==='Arch'       && (bot.archHomingCD||0)===0) ||
+      (attackType==='ogre'       && (bot.ogreMudCD||0)===0)
+    );
+    if(abilityReady && botFrame % 180 < 3) {
+      keys[keyR] = true;
+    }
+
+    // PRIMARY ATTACK
+    if(attackType === 'projectile') {
+      // Rex — fire when enemy is roughly in line
+      if(absDx < 500 && absDy < 80) keys[keyAtk] = true;
+    } else if(attackType === 'Arch') {
+      // Archy — start charging when in range, release after charge
+      if(absDx < 400 && absDy < 70) {
+        if(!(bot._archCharging)) keys[keyAtk] = true;
+        else if((bot._archCharge||0) > 45) { /* release — just stop pressing */ }
+        else keys[keyAtk] = true;
+      }
+    } else if(attackType === 'grampy') {
+      // Gramps — shoot when lined up
+      if(absDx < 350 && absDy < 60) keys[keyAtk] = true;
+    } else if(attackType === 'goob') {
+      if(absDx < 420 && absDy < 70) keys[keyAtk] = true;
+    } else if(attackType === 'brawler') {
+      if(inMeleeRange) keys[keyAtk] = true;
+    } else if(attackType === 'ogre') {
+      // Bruce — charge rock when mid range, slash when close
+      if(absDx > 120 && absDx < 440 && absDy < 80) {
+        keys[keyAtk] = true; // charges rock, releases automatically handled in update
+      }
+      if(inMeleeRange) keys[keyAtk2] = true;
+    } else if(attackType === 'tulip') {
+      if(absDx < 360 && absDy < 70) keys[keyAtk] = true;
+    } else if(attackType === 'icup') {
+      if(inMeleeRange) keys[keyAtk] = true;
+      else if(absDx < 320 && absDy < 60) keys[keyAtk2] = true;
+    } else {
+      if(inAttackRange) keys[keyAtk] = true;
+    }
+
+    // SECONDARY ATTACK — use occasionally at medium range
+    if(botFrame % 120 < 8 && inAttackRange && attackType !== 'grampy') {
+      keys[keyAtk2] = true;
+    }
+  }
+
+  // --- GROUND SLAM if airborne and above enemy ---
+  if(!bot.onGround && bot.vy > 0 && absDx < 60 && bot.y < enemy.y - 20) {
+    keys[keyDown] = true;
+  }
+}
 
 function toggleShards() {
   shardsEnabled = !shardsEnabled;
@@ -1207,8 +1409,8 @@ function refreshGrid() {
 function updatePreviews() {
   document.getElementById('p1name').textContent = CHARS[p1CharIdx].name;
   document.getElementById('p1desc').textContent = CHARS[p1CharIdx].desc;
-  document.getElementById('p2name').textContent = CHARS[p2CharIdx].name;
-  document.getElementById('p2desc').textContent = CHARS[p2CharIdx].desc;
+  document.getElementById('p2name').textContent = CHARS[p2CharIdx].name + (botEnabled ? ' 🤖' : '');
+  document.getElementById('p2desc').textContent = botEnabled ? 'Controlled by AI' : CHARS[p2CharIdx].desc;
   const p3box = document.getElementById('preview3');
   if(p3box) p3box.style.display = playerCount >= 3 ? 'block' : 'none';
   if(playerCount >= 3) {
@@ -1425,6 +1627,7 @@ get controls() {
       return; // skip rest of update — body does nothing
     }
     if(this.hitStun > 0) { this.hitStun--; }
+    if((this.glued || 0) > 0) { this.glued--; }
   if(this.attackCooldown > 0) this.attackCooldown--;
     if(this.grappleCooldown > 0) this.grappleCooldown--;
     if(this.jumpCooldown > 0) this.jumpCooldown--;
@@ -1531,7 +1734,8 @@ get controls() {
       const shadowSpeed = this.shadowMode > 0 ? 2.4 : 1.5;
       if(ctrl.left) { this.vx -= shadowSpeed * quakeSlow; this.dir = -1; }
       if(ctrl.right) { this.vx += shadowSpeed * quakeSlow; this.dir = 1; }
-      if(!ctrl.left && !ctrl.right) this.vx *= 0.7;
+      if(!ctrl.left && !ctrl.right) this.vx *= (this.glued > 0 ? 0.55 : 0.7);
+      if(this.glued > 0) { this.vx *= 0.4; }
      if(this.char.attackType === 'grampy') { this._jetHeld = !!ctrl.attack2; }
       if(this.char.attackType === 'grampy' && this._jetHeld && (this.jetFuel || 0) > 0) {
         this.jetting = true;
@@ -1563,7 +1767,7 @@ get controls() {
 
 // Jump
       const quakeJumpMult = players.some(p => p !== this && (p.axelQuake || 0) > 0) ? 0.4 : 1.0;
-      if(ctrl.jump && !this._jumpHeld) {
+    if(ctrl.jump && !this._jumpHeld) {
         this._jumpHeld = true;
         if(this.onGround) {
           const chaliceJumpMult = (this.chaliceBoost || 0) > 0 ? (this.chaliceJumpBoost || 1) : 1;
@@ -1687,10 +1891,10 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
           this._goobAbilityToggle = (this._goobAbilityToggle || 0) + 1;
           if(this._goobAbilityToggle % 3 !== 0) {
             // ODD uses: TRANCE
-            this.goobTranceCD = 900;
+            this.goobTranceCD = 1250;
             const tranceTarget = players.find(p => p !== this && p.stocks > 0);
             if(tranceTarget) {
-              tranceTarget.tranced = 410;
+              tranceTarget.tranced = 365;
               spawnParticles(tranceTarget.x, tranceTarget.y-30, '#c75aff', 22, {type:'star', size:8, life:28, gravity:0, speed:5});
               spawnParticles(tranceTarget.x, tranceTarget.y-30, '#ffffff', 10, {type:'circle', size:5, life:20, gravity:0, speed:4});
               for(let sp=0; sp<6; sp++) {
@@ -1871,7 +2075,7 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
       this._prevVY = this.vy;
 
       // Ground slam — only at or past peak
-    if(ctrl.down && !this.onGround && !this._slamHeld && !this.slamming && this._pastPeak && this.char.attackType !== 'goob') {
+    if(ctrl.down && !this.onGround && !this._slamHeld && !this.slamming && this._pastPeak && this.char.attackType !== 'goob' && (this.glued || 0) === 0) {
         this._slamHeld = true;
         this.slamming = true;
         this.vy = 5;
@@ -1937,6 +2141,43 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
           spawnParticles(this.x + this.dir * 20, this.y - 30, '#888888', 6, {type:'square', size:4, life:10, gravity:0.15, speed:4});
           spawnParticles(this.x + this.dir * 20, this.y - 30, '#cccccc', 3, {type:'square', size:2, life:7, gravity:0.1, speed:3});
           screenShake = chargeRatio > 0.5 ? 6 : 3;
+        }
+      }
+
+      // GRAMPS CHARGE SHOTGUN — hold attack, release to fire
+      if(this.char.attackType === 'grampy' && this._grampsCharging) {
+        if(ctrl.attack && this.attackCooldown === 0) {
+          this._grampsCharge = Math.min((this._grampsCharge || 0) + 1, 28);
+        } else {
+          const charge = this._grampsCharge || 0;
+          this._grampsCharging = false;
+          this._grampsCharge = 0;
+          if(charge >= 28) {
+            // SHOTGUN BLAST — 9 pellets, very short range, high damage
+            this.attackCooldown = 45;
+            this.attackTimer = 12;
+            const spreads = [-0.5, -0.35, -0.18, -0.08, 0, 0.08, 0.18, 0.35, 0.5];
+            spreads.forEach(angle => {
+              projectiles.push({
+                x: this.x + this.dir * 18, y: this.y - 26,
+                vx: this.dir * 7, vy: angle * 8,
+                owner: this, life: 6,
+                color: '#ff8800', big: false, dmg: 3.7, noGravity: true,
+                shotgunPellet: true
+              });
+            });
+            spawnParticles(this.x + this.dir*18, this.y-26, '#ff8800', 18, {type:'line', size:3, life:8, gravity:0, speed:8});
+            spawnParticles(this.x + this.dir*18, this.y-26, '#ffffff', 10, {type:'square', size:2, life:6, gravity:0, speed:5});
+            spawnParticles(this.x + this.dir*18, this.y-26, '#ffdd00', 8, {type:'star', size:5, life:10, gravity:0.05, speed:4});
+            screenShake = 12;
+          } else {
+            // TAP = normal single bullet
+            this.attackCooldown = 23;
+            this.attackTimer = 8;
+            this.bulletPending = 7;
+            this.bulletDir = this.dir;
+            this.bulletY = this.y - 26;
+          }
         }
       }
 
@@ -2093,6 +2334,7 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
           // AOE damage check
           players.forEach(p => {
             if(p === this) return;
+            if(p.grampsShield > 0) return;
             const dist = Math.hypot(p.x - this.x, p.y - this.y);
             if(dist < 120) {
               const falloff = 1 - dist/120;
@@ -2192,7 +2434,7 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
     if(this.attackTimer > 0 && this.char.attackType === 'brawler' && this.isSecondary) this.state = 'grapple';
 
     // Respawn if fell off
-  if(this.y > canvas.height + 100 || this.y < -300 || this.x < -300 || this.x > canvas.width + 300) {
+  if(this.y > canvas.height + canvas.height*0.45 || this.y < -canvas.height*0.55 || this.x < -canvas.width*0.45 || this.x > canvas.width*1.45) {
       this.stocks--;
       if(this.stocks > 0) {
       this.x = this.side === 1 ? canvas.width*0.25 : this.side === 3 ? canvas.width*0.5 : canvas.width*0.75;
@@ -2311,6 +2553,23 @@ if(this.char.attackType === 'brawler') {
       }
     }
 
+   // GLUE GUN OVERRIDE — if player has charges, Q fires glue instead of normal attack
+    if(!isSecondary && (this.glueGunCharges || 0) > 0 && this.attackCooldown === 0) {
+      this.glueGunCharges--;
+      this.attackCooldown = 40;
+      this.attackTimer = 10;
+      projectiles.push({
+        x: this.x + this.dir * 20, y: this.y - 28,
+        vx: this.dir * 7, vy: 0,
+        owner: this, life: 80,
+        color: '#00ced1', big: false, glueSplat: true, dmg: 0, noGravity: true,
+        w: 28, h: 28
+      });
+      spawnParticles(this.x + this.dir*20, this.y-28, '#00ced1', 8, {type:'circle', size:6, life:12, gravity:0, speed:3});
+      spawnParticles(this.x + this.dir*20, this.y-28, '#ffffff', 4, {type:'star', size:4, life:8, gravity:0, speed:2});
+      return;
+    }
+
    if(this.char.attackType === 'punch') {
       if(!isSecondary) {
         // DASH PUNCH — wide hitbox so it hits close AND far
@@ -2330,12 +2589,12 @@ if(this.char.attackType === 'brawler') {
     
   } else if(this.char.attackType === 'grampy') {
       if(!isSecondary) {
-        this.attackCooldown = 23;
-        this.attackTimer = 8;
-        this.bulletPending = 7;
-        this.bulletDir = this.dir;
-        this.bulletY = this.y - 26;
-}
+        // begin charging — fire on release, handled in update()
+        if(!this._grampsCharging) {
+          this._grampsCharging = true;
+          this._grampsCharge = 0;
+        }
+      }
     } else if(this.char.attackType === 'ninja') {
       if(!isSecondary) {
         // KUNAI THROW — 2 kunais staggered one after the other, same line
@@ -2582,7 +2841,7 @@ if(this.char.attackType === 'brawler') {
           projectiles.push({
             x: this.x + this.dir*15, y: this.y-22,
             vx: this.dir * 9, vy: angle * 3,
-            owner: this, life: 55, color: this.char.specialColor, big: false, dmg: 1, noGravity: true, noBurn: true
+            owner: this, life: 55, color: this.char.specialColor, big: false, dmg: 0.3, noGravity: true, noBurn: true, multiHit: true
           });
         });
       } else {
@@ -2974,13 +3233,66 @@ if(this.char.attackType === 'projectile' && rexDragon && rexDragon.owner === thi
     }
 
     // Poison indicator
-    if(this.burnTimer > 0) {
+   if(this.burnTimer > 0) {
       ctx.save();
       ctx.globalAlpha = 0.5 + Math.sin(frame*0.25)*0.3;
       ctx.fillStyle = '#ff4400';
       ctx.font = '9px Courier New';
       ctx.textAlign = 'center';
       ctx.fillText('🔥 BURN', this.x, this.y - 70);
+      ctx.restore();
+    }
+    if((this.glued || 0) > 0) {
+      const gRatio = this.glued / 210;
+      ctx.save();
+      // dripping glue blobs around character
+      ctx.globalAlpha = 0.7 * gRatio;
+      ctx.fillStyle = '#00ced1';
+      for(let g = 0; g < 6; g++) {
+        const ga = (g / 6) * Math.PI * 2 + frame * 0.04;
+        const gdist = 18 + Math.sin(frame * 0.08 + g) * 4;
+        ctx.beginPath();
+        ctx.arc(this.x + Math.cos(ga) * gdist, this.y - 24 + Math.sin(ga) * gdist * 0.7, 5 + Math.sin(frame*0.1+g)*2, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // drip lines falling
+      ctx.globalAlpha = 0.5 * gRatio;
+      ctx.fillStyle = '#008888';
+      for(let d = 0; d < 4; d++) {
+        const dx = this.x - 12 + d * 8;
+        const dlen = 8 + Math.sin(frame * 0.06 + d * 1.5) * 4;
+        ctx.fillRect(dx, this.y - 8, 3, dlen);
+      }
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#00ced1';
+      ctx.font = 'bold 10px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('🫧 GLUED!', this.x, this.y - 82);
+      ctx.fillStyle = '#aaffff';
+      ctx.font = '8px Courier New';
+      
+      ctx.restore();
+    }
+    if((this.glueGunCharges || 0) > 0) {
+      ctx.save();
+      // draw tiny glue gun next to character
+      ctx.translate(this.x + this.dir * 22, this.y - 30);
+      ctx.scale(this.dir * 0.45, 0.45);
+      drawGlueGun(ctx, 0, 0);
+      ctx.resetTransform();
+      // charge pips
+      for(let g = 0; g < 3; g++) {
+        ctx.fillStyle = g < this.glueGunCharges ? '#00ced1' : '#1a1a1a';
+        ctx.strokeStyle = '#00ced1';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(this.x - 8 + g * 8, this.y - 50, 3, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = '#00ced1';
+      ctx.font = '7px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('GLUE GUN', this.x, this.y - 56);
       ctx.restore();
     }
     if(this.poisoned > 0) {
@@ -3233,6 +3545,21 @@ if(this.char.attackType === 'projectile' && rexDragon && rexDragon.owner === thi
       ctx.fillStyle = fill >= 1 ? '#f5e642' : '#555';
       ctx.font = '7px Courier New'; ctx.textAlign = 'center';
       ctx.fillText(fill >= 1 ? '🛡 SHIELD RDY' : '🛡 shield...', this.x, barY - 2);
+      if(this._grampsCharging && (this._grampsCharge || 0) > 0) {
+        const gcRatio = this._grampsCharge / 28;
+        const gcW = 44;
+        const gcY = barY - 20;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(this.x - gcW/2, gcY, gcW, 6);
+        ctx.fillStyle = gcRatio >= 1 ? '#ff4400' : '#ff8800';
+        ctx.fillRect(this.x - gcW/2, gcY, gcW * gcRatio, 6);
+        ctx.strokeStyle = gcRatio >= 1 ? '#ffffff' : '#555';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(this.x - gcW/2, gcY, gcW, 6);
+        ctx.fillStyle = gcRatio >= 1 ? '#ff4400' : '#aaaaaa';
+        ctx.font = 'bold 8px Courier New'; ctx.textAlign = 'center';
+        ctx.fillText(gcRatio >= 1 ? '💥 RELEASE!' : '🔫 charging...', this.x, gcY - 2);
+      }
     }
     if(this.char.attackType === 'projectile') {
       const cd = this.rexFirewallCD || 0;
@@ -3461,6 +3788,51 @@ const POISON_GRID = [
 ["0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","AY","AS","AY"]
 ];
 
+const GLUE_GUN_GRID = [
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","AZ","AZ","AZ","AZ","8","Z","Z","AZ","Z","Z","Z","AZ","Z","Z","Z","Z","G","G","G","AT","AZ","Z","Z","AZ","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","AZ","AZ","AZ","3","AZ","8","Z","Z","Z","AZ","Z","Z","Z","Z","Z","Z","Z","AZ","AZ","AZ","AT","AZ","Z","Z","AZ","AZ","3","AZ","AZ","AZ","AZ","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","AZ","BC","AZ","AZ","3","AZ","8","Z","Z","Z","Z","Z","Z","Z","Z","Z","Z","Z","Z","Z","Z","E","Z","Z","Z","AZ","AZ","3","AZ","X","X","X","AZ","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","AZ","AZ","AZ","AZ","8","Z","Z","Z","Z","Z","Z","Z","Z","Z","AZ","AZ","AZ","AZ","AZ","AT","AZ","AZ","Z","AZ","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","8","Z","BE","BE","8","8","8","8","8","8","Z","Z","Z","AZ","AZ","AT","AZ","AZ","Z","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","AZ","AZ","AZ","8","8","8","Z","Z","Z","E","Z","Z","Z","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","P","AZ","AZ","8","8","Z","E","Z","Z","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AP","AP","3","3","AZ","8","Z","AT","AZ","Z","Z","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","8","8","AT","AZ","Z","Z","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","8","E","Z","Z","Z","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","AZ","8","Z","Z","Z","Z","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","8","8","8","Z","Z","Z","Z","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","S","AZ","AZ","AZ","Y","Y","Y","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AZ","AZ","Y","Y","Y","Y","AZ","Y","Y","Y","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AM","Y","S","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","AT","AZ","AZ","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"],
+["Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y","Y"]
+];
+
+function drawGlueGun(ctx, x, y) {
+  const ps = 3;
+  const cols = 42;
+  const rows = 24;
+  for(let row = 0; row < rows; row++) {
+    const rowData = GLUE_GUN_GRID[row];
+    if(!rowData) continue;
+    for(let col = 0; col < cols; col++) {
+      const val = rowData[col];
+      if(val === 'Y' || val === 0) continue;
+      const cl = PIXEL_COLORS[val];
+      if(!cl) continue;
+      ctx.fillStyle = cl;
+      ctx.fillRect(x - (cols*ps/2) + col*ps, y - (rows*ps/2) + row*ps, ps, ps);
+    }
+  }
+}
+
 let powerups = [];
 let powerupSpawnTimer = 0;
 let rexDragon = null;
@@ -3472,7 +3844,8 @@ function trySpawnPowerup() {
   const validPlats = PLATFORMS.filter(p => !p.broken && p.w > 80);
   if(validPlats.length === 0) return;
   const plat = validPlats[Math.floor(Math.random() * validPlats.length)];
-  const puType = Math.random() < 0.5 ? 'chalice' : 'poison';
+  const puTypes = ['chalice', 'poison', 'gluegun'];
+  const puType = puTypes[Math.floor(Math.random() * puTypes.length)];
   powerups.push({
     x: plat.x + plat.w * (0.3 + Math.random() * 0.4),
     y: plat.y - 36,
@@ -3732,6 +4105,7 @@ gameRunning = true;
     players.push(new Player(canvas.width*0.75, canvas.height*0.6, p2CharIdx, 2));
   }
   players.forEach((p, i) => { p.controlScheme = playerSchemes[i] || 'kb1'; });
+  if(botEnabled) botPlayerIndex = playerCount - 1; // bot always controls last player
   spawnCrystals();
   updateHUD();
   requestAnimationFrame(gameLoop);
@@ -3868,9 +4242,13 @@ powerupSpawnTimer++;
             pl.chaliceJumpBoost = 1.4;
             spawnParticles(pu.x, pu.y, '#d4af37', 22, {type:'star', size:8, life:28, gravity:0, speed:6});
             spawnParticles(pu.x, pu.y, '#ffffff', 12, {type:'circle', size:5, life:20, gravity:0, speed:4});
-          } else if(pu.type === 'poison') {
+         } else if(pu.type === 'poison') {
             pl.poisonAttack = 660;
             spawnParticles(pu.x, pu.y, '#76ff03', 22, {type:'star', size:8, life:28, gravity:0, speed:6});
+            spawnParticles(pu.x, pu.y, '#ffffff', 12, {type:'circle', size:5, life:20, gravity:0, speed:4});
+          } else if(pu.type === 'gluegun') {
+            pl.glueGunCharges = 3;
+            spawnParticles(pu.x, pu.y, '#00ced1', 22, {type:'star', size:8, life:28, gravity:0, speed:6});
             spawnParticles(pu.x, pu.y, '#ffffff', 12, {type:'circle', size:5, life:20, gravity:0, speed:4});
           }
           screenShake = 10;
@@ -3919,6 +4297,7 @@ powerupSpawnTimer++;
   }
 
   // Update
+  updateBot();
   players.forEach(p => { p.update(players.find(o => o !== p)); });
   for(let i=0;i<players.length;i++) {
     for(let j=0;j<players.length;j++) {
@@ -3949,8 +4328,10 @@ powerupSpawnTimer++;
     if(!pr.arrow && !pr.noGravity) pr.vy += (pr.rockGravity || 0.1);
     pr.life--;
     // hit check
-    const others = players.filter(p => p !== pr.owner && p.stocks > 0);
-    const other = others.find(p => p.hitStun === 0) || null;
+   const others = players.filter(p => p !== pr.owner && p.stocks > 0);
+    const other = (pr.shotgunPellet || pr.multiHit)
+      ? (others.find(p => Math.abs(pr.x - p.x) < 30 && pr.y > p.y - 70 && pr.y < p.y + 10) || null)
+      : (others.find(p => p.hitStun === 0) || null);
     // PARRY CHECK — reflect projectile if in parry window
   if(other && other.parryWindow > 0 && Math.abs(pr.x - other.x) < 30 && Math.abs(pr.y - (other.y-20)) < 36) {
       pr.vx *= -1.5;
@@ -4224,7 +4605,32 @@ if(pr.goobLaser && pr.owner && pr.owner.goobRiftX !== undefined) {
         continue;
       }
     }
-    if(other && !pr.heartBomb && !pr.goobRift && !pr.passThrough && Math.abs(pr.x - other.x) < 30 && pr.y > other.y - 70 && pr.y < other.y + 10) {
+    if(pr.shotgunPellet) {
+      const pelletTarget = players.find(p => p !== pr.owner && p.stocks > 0 && (p.grampsShield || 0) === 0 && Math.abs(pr.x - p.x) < 28 && pr.y > p.y - 70 && pr.y < p.y + 10);
+      if(pelletTarget) {
+        pelletTarget.damage += pr.dmg;
+        const kb = 3 + pelletTarget.damage * 0.09;
+        pelletTarget.vx = (pr.vx > 0 ? 1 : -1) * kb * 0.9;
+        pelletTarget.vy = -(kb * 0.45 + 1.5);
+        pelletTarget.hitStun = 5;
+        spawnHitSparks(pr.x, pr.y, pr.vx > 0 ? 1 : -1, '#ff8800');
+        if(pr.owner) { pr.owner.comboCount = Math.max(0, (pr.owner.comboCount || 0) + 1); pr.owner.comboDecay = 0; }
+        projectiles.splice(i, 1);
+        continue;
+      }
+    }
+   if(pr.glueSplat && other && Math.abs(pr.x - other.x) < 34 && pr.y > other.y - 75 && pr.y < other.y + 10) {
+      if((other.grampsShield || 0) === 0) {
+        other.glued = 210;
+        spawnParticles(other.x, other.y - 24, '#00ced1', 20, {type:'circle', size:10, life:28, gravity:0.05, speed:5});
+        spawnParticles(other.x, other.y - 24, '#ffffff', 10, {type:'star', size:6, life:20, gravity:0.04, speed:3});
+        spawnParticles(other.x, other.y - 24, '#008888', 8, {type:'square', size:8, life:32, gravity:0.06, speed:4});
+        screenShake = 6;
+      }
+      projectiles.splice(i, 1);
+      continue;
+    }
+    if(other && !pr.heartBomb && !pr.goobRift && !pr.passThrough && !pr.piercingSlug && (other.grampsShield || 0) === 0 && Math.abs(pr.x - other.x) < 30 && pr.y > other.y - 70 && pr.y < other.y + 10) {
       const projDmg = pr.dmg !== undefined ? pr.dmg : 7;
      if(!pr.arrow && !pr.grenade && !pr.shard && !pr.bullet && !pr.ogreRock) {
         if(!pr.owner._triHits) pr.owner._triHits = 0;
@@ -4237,7 +4643,7 @@ if(pr.goobLaser && pr.owner && pr.owner.goobRiftX !== undefined) {
       const pdir = pr.vx !== 0 ? Math.sign(pr.vx) : 1;
       other.vx = pdir * kb * 0.9;
       other.vy = -(kb * 0.45 + 1.5);
-     other.hitStun = Math.min(45, 12 + Math.floor(other.damage / 6));
+     other.hitStun = pr.shotgunPellet ? 5 : Math.min(45, 12 + Math.floor(other.damage / 6));
       if(pr.laser) {
         // stun — freeze in place briefly with electric sparks
         other.hitStun = 55;
@@ -4279,8 +4685,9 @@ if(pr.goobLaser && pr.owner && pr.owner.goobRiftX !== undefined) {
           spawnParticles(pr.x, pr.y, '#ffb300', 16);
           spawnParticles(pr.x, pr.y, '#ff5722', 10);
           const blastRadius = 115;
-          players.forEach(p => {
+         players.forEach(p => {
             if(p === pr.owner) return;
+            if(p.grampsShield > 0) return;
             const dist = Math.hypot(p.x - pr.x, p.y - 24 - pr.y);
             if(dist < blastRadius) {
               const falloff = 1 - (dist / blastRadius);
@@ -5794,6 +6201,31 @@ if(pr.arrow) {
       continue;
     }
 
+    if(pr.glueSplat) {
+      ctx.save();
+      ctx.translate(pr.x, pr.y);
+      const gp = 0.7 + Math.sin(frame * 0.2) * 0.15;
+      ctx.globalAlpha = gp;
+      // outer glow
+      const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 22);
+      gg.addColorStop(0, '#00ffff'); gg.addColorStop(0.5, '#00ced1'); gg.addColorStop(1, 'transparent');
+      ctx.fillStyle = gg;
+      ctx.beginPath(); ctx.ellipse(0, 0, 22, 16, 0, 0, Math.PI*2); ctx.fill();
+      // blob body
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#00ced1';
+      ctx.beginPath(); ctx.ellipse(0, 0, 13, 10, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#00ffff';
+      ctx.beginPath(); ctx.ellipse(-3, -3, 6, 4, -0.4, 0, Math.PI*2); ctx.fill();
+      // drip tails behind
+      const bd = pr.vx > 0 ? -1 : 1;
+      ctx.fillStyle = '#008888';
+      ctx.beginPath(); ctx.ellipse(bd*14, 2, 7, 4, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bd*22, 0, 4, 3, 0, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+      continue;
+    }
+
     const r = pr.big ? 13 : 6;
     ctx.fillStyle = pr.big ? '#ff6f00' : pr.color;
     ctx.beginPath();
@@ -5957,7 +6389,7 @@ if(pr.arrow) {
       ctx.font = 'bold 11px Courier New';
       ctx.textAlign = 'center';
       ctx.fillText('CHALICE', pu.x, puY - (rows * 3 / 2) - 6);
-    } else {
+    } else if(pu.type === 'poison') {
       const ps = 3;
       const cols = 31;
       const rows = 32;
@@ -5977,6 +6409,12 @@ if(pr.arrow) {
       ctx.font = 'bold 11px Courier New';
       ctx.textAlign = 'center';
       ctx.fillText('POISON', pu.x, puY - (rows * 3 / 2) - 6);
+    } else if(pu.type === 'gluegun') {
+      drawGlueGun(ctx, pu.x, puY);
+      ctx.fillStyle = '#00ced1';
+      ctx.font = 'bold 11px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('GLUE GUN', pu.x, puY - 42);
     }
     ctx.restore();
   }
@@ -6049,5 +6487,4 @@ if(pr.arrow) {
 }
 </script>
 </body>
-
 </html>
