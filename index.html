@@ -146,7 +146,8 @@
     <!-- Lock-in status + next button -->
     <div style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-shrink:0;">
       <div id="lock-status" style="font-size:10px;color:#555;letter-spacing:2px;">Lock in your characters to continue</div>
-      <button id="botbtn" onclick="toggleBot()" style="background:#0a0a14;color:#555;border:2px solid #555;padding:12px 20px;font-family:'Courier New',monospace;font-size:13px;font-weight:bold;cursor:pointer;letter-spacing:2px;">BOT: OFF</button>
+<button id="botbtn" onclick="toggleBot()" style="background:#0a0a14;color:#555;border:2px solid #555;padding:12px 20px;font-family:'Courier New',monospace;font-size:13px;font-weight:bold;cursor:pointer;letter-spacing:2px;">BOT: OFF</button>
+      <button id="botdiffbtn" onclick="cycleBotDiff()" style="background:#0a0a14;color:#555;border:2px solid #555;padding:12px 14px;font-family:'Courier New',monospace;font-size:11px;font-weight:bold;cursor:pointer;letter-spacing:1px;display:none;">EASY</button>
 <button id="lockbtn" onclick="lockAndNext()" style="background:linear-gradient(180deg,#2a1a00,#0a0a14);color:#ffe600;border:3px solid #ffe600;padding:12px 36px;font-family:'Courier New',monospace;font-size:15px;font-weight:bold;cursor:pointer;letter-spacing:4px;transition:all 0.1s;box-shadow:0 0 18px #ffe600, inset 0 0 8px rgba(255,230,0,0.1);text-shadow:0 0 8px #ffe600;">LOCK IN ▶</button>
     </div>
   </div>
@@ -916,12 +917,15 @@ const CHARS = PIXEL_CHARS.map((pc, charIdx) => ({
   color: ['#e02020','#f5e642','#06402B','#e02020','#ff69b4','#ffe033','#638756','#c75aff'][charIdx] || '#fff',
   draw(ctx, x, y, dir, state, headless) {
     const t = Date.now();
-    const ps = PIXEL_SIZE;
+    const ps = (pc.name === 'SCRIBBLES') ? 1 : PIXEL_SIZE;
    const isTulip = pc.attackType === 'tulip';
     const isGoob = pc.attackType === 'goob';
     const isOgre = pc.attackType === 'ogre';
-    const cols = isTulip ? 18 : isGoob ? 12 : (isOgre && state === 'slash') ? 26 : isOgre ? 22 : 14;
-    const rows = isTulip ? 24 : isGoob ? 19 : isOgre ? 22 : 18;
+    const isScribbles = pc.name === 'SCRIBBLES';
+    const cols = isTulip ? 18 : isGoob ? 12 : (isOgre && state === 'slash') ? 26 : isOgre ? 22 : isScribbles ? 31 : 14;
+    const rows = isTulip ? 24 : isGoob ? 19 : isOgre ? 22 : isScribbles ? 32 : 18;
+    const scribScale = isScribbles ? 1.45 : 1;
+    const scribblesCenterOffset = 0;
     const totalW = cols * ps;
     const totalH = rows * ps;
     const bob = state === 'walk' ? Math.sin(t / 80) * 1.5 : 0;
@@ -949,7 +953,7 @@ const CHARS = PIXEL_CHARS.map((pc, charIdx) => ({
 
 
 
-    if(state === 'walk') {
+    if(state === 'walk' && !isScribbles) {
       const legShift = Math.round(Math.sin(t / 80) * 1.5);
       const legStartRow = isTulip ? 23 : isGoob ? 18 : isOgre ? 20 : 14;
       octx.clearRect(0, legStartRow * ps, totalW, (rows - legStartRow) * ps);
@@ -1005,15 +1009,29 @@ function randomChar(player) {
 let botEnabled = false;
 let botPlayerIndex = 1; // which player index the bot controls (0=P1, 1=P2)
 
+let botDifficulty = 'easy'; // 'easy' or 'hard'
+
+function cycleBotDiff() {
+  botDifficulty = botDifficulty === 'easy' ? 'hard' : 'easy';
+  const btn = document.getElementById('botdiffbtn');
+  if(btn) {
+    btn.textContent = botDifficulty.toUpperCase();
+    btn.style.color = botDifficulty === 'hard' ? '#ef5350' : '#4fc3f7';
+    btn.style.borderColor = botDifficulty === 'hard' ? '#ef5350' : '#4fc3f7';
+  }
+}
+
 function toggleBot() {
   botEnabled = !botEnabled;
   const btn = document.getElementById('botbtn');
+  const diffBtn = document.getElementById('botdiffbtn');
   if(btn) {
     btn.style.background = botEnabled ? '#ffe600' : '#0a0a14';
     btn.style.color = botEnabled ? '#000' : '#555';
     btn.style.borderColor = botEnabled ? '#ffe600' : '#555';
     btn.textContent = botEnabled ? 'BOT: ON ✓' : 'BOT: OFF';
   }
+  if(diffBtn) diffBtn.style.display = botEnabled ? 'inline-block' : 'none';
   updatePreviews();
 }
 
@@ -1022,7 +1040,10 @@ function updateBot() {
   const bot = players[botPlayerIndex];
   if(!bot || bot.stocks <= 0) return;
 
-  // find nearest enemy
+  const isEasy = botDifficulty === 'easy';
+  // Easy mode: bot acts every other 3 frames and has random hesitation
+  if(isEasy && frame % 3 !== 0) return;
+
   const enemies = players.filter((p, i) => i !== botPlayerIndex && p.stocks > 0);
   if(enemies.length === 0) return;
   const enemy = enemies.reduce((closest, e) =>
@@ -1035,7 +1056,6 @@ function updateBot() {
   const absDx = Math.abs(dx);
   const absDy = Math.abs(dy);
 
-  // clear bot keys every frame
   const scheme = bot.controlScheme || 'kb2';
   const keyLeft  = scheme==='kb1'?'KeyA':scheme==='kb2'?'KeyL':'GP2_LEFT';
   const keyRight = scheme==='kb1'?'KeyD':scheme==='kb2'?'Quote':'GP2_RIGHT';
@@ -1056,136 +1076,139 @@ function updateBot() {
   const botFrame = frame;
   const attackType = bot.char.attackType;
 
-  // --- SURVIVAL: if near edge, move away ---
-  const edgeMargin = canvas.width * 0.12;
+  // Easy mode cooldowns — bot waits longer between actions
+  const attackDelay = isEasy ? 28 : 18;
+  const jumpDelay   = isEasy ? 50 : 40;
+  const abilityDelay = isEasy ? 300 : 120;
+  const reactionChance = isEasy ? 0.75 : 1.0;
+
+  // ---- SURVIVAL LOGIC ----
+  const edgeMargin = canvas.width * 0.10;
   const nearLeftEdge  = bot.x < edgeMargin;
   const nearRightEdge = bot.x > canvas.width - edgeMargin;
-  const dangerouslyLow = bot.y > canvas.height * 0.80;
 
   if(nearLeftEdge && bot.onGround)  { keys[keyRight] = true; }
   if(nearRightEdge && bot.onGround) { keys[keyLeft]  = true; }
 
-  // --- JUMP to get back on platform if falling ---
-  if(!bot.onGround && bot.y > canvas.height * 0.75) {
-    if(bot.jumpsLeft > 0) keys[keyJump] = true;
-  }
-
-  // --- JUMP to reach enemy on higher platform ---
-  const enemyHigher = enemy.y < bot.y - 60;
-  if(enemyHigher && bot.onGround && absDx < 200 && botFrame % 40 < 6) {
+  if(!bot.onGround && bot.y > canvas.height * 0.55 && bot.jumpsLeft > 0) {
     keys[keyJump] = true;
   }
+  if(!bot.onGround && bot.y > canvas.height * 0.4) {
+    keys[keyJump] = true;
+    if(bot.x < canvas.width * 0.2) keys[keyRight] = true;
+    if(bot.x > canvas.width * 0.8) keys[keyLeft] = true;
+  }
 
-  // --- DODGE: if enemy projectile is incoming, jump or move away ---
-  const incomingProjectile = projectiles.find(pr => {
-    if(pr.owner === bot) return false;
-    if(pr.mudWall || pr.firewall || pr.heartBomb) return false;
-    const toBot = Math.hypot(pr.x - bot.x, pr.y - bot.y);
-    if(toBot > 280) return false;
-    // is it moving toward bot?
-    const moving = (pr.vx > 0 && pr.x < bot.x) || (pr.vx < 0 && pr.x > bot.x);
-    return moving && Math.abs(pr.y - bot.y) < 60;
-  });
-  if(incomingProjectile && bot.hitStun === 0) {
-    // jump over it or sidestep
-    if(bot.onGround && botFrame % 8 < 4) {
-      keys[keyJump] = true;
-    } else {
-      // move perpendicular — away from projectile x direction
-      if(incomingProjectile.vx > 0) keys[keyLeft] = true;
+  // ---- DODGE INCOMING PROJECTILES (hard only) ----
+  if(!isEasy) {
+    const incomingProjectile = projectiles.find(pr => {
+      if(pr.owner === bot) return false;
+      if(pr.mudWall || pr.firewall || pr.heartBomb) return false;
+      const toBot = Math.hypot(pr.x - bot.x, pr.y - bot.y);
+      if(toBot > 280) return false;
+      const moving = (pr.vx > 0 && pr.x < bot.x) || (pr.vx < 0 && pr.x > bot.x);
+      return moving && Math.abs(pr.y - bot.y) < 60;
+    });
+    if(incomingProjectile && bot.hitStun === 0) {
+      if(bot.onGround && botFrame % 8 < 4) keys[keyJump] = true;
+      else {
+        if(incomingProjectile.vx > 0) keys[keyLeft] = true;
+        else keys[keyRight] = true;
+      }
+    }
+  }
+
+  // ---- MOVEMENT TOWARD ENEMY ----
+  if(!nearLeftEdge && !nearRightEdge && Math.random() < reactionChance) {
+    const isRanged = (attackType === 'projectile' || attackType === 'Arch' || attackType === 'grampy' || attackType === 'goob');
+    const preferredDist = isRanged ? (isEasy ? 220 : 260) : (isEasy ? 70 : 90);
+    if(absDx > preferredDist + 40) {
+      if(dx > 0) keys[keyRight] = true;
+      else keys[keyLeft] = true;
+    } else if(!isRanged && absDx < 30) {
+      // strafe away slightly to avoid getting cornered
+      if(dx > 0) keys[keyLeft] = true;
       else keys[keyRight] = true;
+    } else {
+      if(dx > 0) keys[keyRight] = true;
+      else keys[keyLeft] = true;
     }
   }
 
-  // --- POSITIONING: move toward enemy ---
-  // ranged characters want to keep medium distance, melee wants to get close
-  const isRanged = (attackType === 'projectile' || attackType === 'Arch' || attackType === 'grampy' || attackType === 'goob');
-  const preferredDist = isRanged ? 280 : 90;
-  const tooFar  = absDx > preferredDist + 60;
-  const tooClose = absDx < preferredDist - 60;
-
-  if(!nearLeftEdge && !nearRightEdge && !incomingProjectile) {
-  if(dx > 0) keys[keyRight] = true;
-  else keys[keyLeft] = true;
-}
-
-  // --- PLATFORM NAVIGATION: jump gaps ---
-  // if bot is on ground and enemy is on a different platform, jump toward them
-  if(bot.onGround && !bot._botJumpCooldown && absDy > 50 && absDx < 300) {
-    if(botFrame % 60 < 5) {
-      keys[keyJump] = true;
-      bot._botJumpCooldown = 55;
-    }
+  // ---- JUMPING TO REACH ENEMY ----
+  const enemyHigher = enemy.y < bot.y - 40;
+  if(enemyHigher && bot.onGround && absDx < 320 && botFrame % jumpDelay < 5 && Math.random() < reactionChance) {
+    keys[keyJump] = true;
+    if(enemy.x > bot.x) keys[keyRight] = true;
+    else keys[keyLeft] = true;
   }
-  if(bot._botJumpCooldown > 0) bot._botJumpCooldown--;
-
-  // --- JUMP over enemy if stuck at same level and close ---
-  if(bot.onGround && absDx < 50 && absDy < 30 && botFrame % 70 < 5) {
+  if(enemyHigher && !bot.onGround && bot.jumpsLeft > 0 && absDx < 320 && botFrame % 30 < 5) {
+    keys[keyJump] = true;
+  }
+  if(bot.onGround && absDx < 55 && absDy < 30 && botFrame % (jumpDelay + 20) < 5) {
     keys[keyJump] = true;
   }
 
-  // --- ATTACK LOGIC based on character type ---
-  const inAttackRange = dist < 160 && absDy < 80;
-  const inMeleeRange  = dist < 110 && absDy < 70;
-  const canAttack = (bot.attackCooldown || 0) === 0 && bot.hitStun === 0 && (bot.tranced || 0) === 0;
+  // ---- ATTACK LOGIC ----
+  const inAttackRange = dist < 170 && absDy < 85;
+  const inMeleeRange  = dist < 115 && absDy < 70;
+  const canAttack = (bot.attackCooldown || 0) === 0 && bot.hitStun === 0;
+  // Easy bot adds artificial delay between attacks
+  bot._easyAttackTimer = (bot._easyAttackTimer || 0);
+  if(bot._easyAttackTimer > 0) { bot._easyAttackTimer--; }
+  const attackAllowed = !isEasy || bot._easyAttackTimer === 0;
 
-  if(canAttack) {
-    // use 3rd ability (R key) when cooldown is ready — every character
-    const abilityReady = (
-      (attackType==='tulip'      && (bot.tulipHealCD||0)===0 && bot.damage > 40) ||
-      (attackType==='grampy'     && (bot.grampsShieldCD||0)===0 && bot.damage > 30) ||
-      (attackType==='brawler'    && (bot.axelQuakeCD||0)===0) ||
-      (attackType==='icup'       && (bot.icupHeadCD||0)===0 && !bot.icupHeadActive) ||
-      (attackType==='goob'       && (bot.goobTranceCD||0)===0) ||
-      (attackType==='projectile' && (bot.rexFirewallCD||0)===0) ||
-      (attackType==='Arch'       && (bot.archHomingCD||0)===0) ||
-      (attackType==='ogre'       && (bot.ogreMudCD||0)===0)
-    );
-    if(abilityReady && botFrame % 180 < 3) {
-      keys[keyR] = true;
-    }
-
-    // PRIMARY ATTACK
+  if(canAttack && attackAllowed && Math.random() < reactionChance) {
     if(attackType === 'projectile') {
-      // Rex — fire when enemy is roughly in line
-      if(absDx < 500 && absDy < 80) keys[keyAtk] = true;
+      if(absDx < 500 && absDy < 80) {
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
+      }
     } else if(attackType === 'Arch') {
-      // Archy — start charging when in range, release after charge
       if(absDx < 400 && absDy < 70) {
-        if(!(bot._archCharging)) keys[keyAtk] = true;
-        else if((bot._archCharge||0) > 45) { /* release — just stop pressing */ }
-        else keys[keyAtk] = true;
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
       }
     } else if(attackType === 'grampy') {
-      // Gramps — shoot when lined up
-      if(absDx < 350 && absDy < 60) keys[keyAtk] = true;
-    } else if(attackType === 'goob') {
-      if(absDx < 420 && absDy < 70) keys[keyAtk] = true;
-    } else if(attackType === 'brawler') {
-      if(inMeleeRange) keys[keyAtk] = true;
-    } else if(attackType === 'ogre') {
-      // Bruce — charge rock when mid range, slash when close
-      if(absDx > 120 && absDx < 440 && absDy < 80) {
-        keys[keyAtk] = true; // charges rock, releases automatically handled in update
+      if(absDx < 350 && absDy < 60) {
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
       }
+    } else if(attackType === 'goob') {
+      if(absDx < 420 && absDy < 70) {
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
+      }
+    } else if(attackType === 'brawler') {
+      if(inMeleeRange) {
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
+      }
+    } else if(attackType === 'ogre') {
+      if(absDx > 100 && absDx < 440 && absDy < 80) keys[keyAtk] = true;
       if(inMeleeRange) keys[keyAtk2] = true;
+      if(isEasy) bot._easyAttackTimer = attackDelay;
     } else if(attackType === 'tulip') {
-      if(absDx < 360 && absDy < 70) keys[keyAtk] = true;
+      if(absDx < 360 && absDy < 70) {
+        keys[keyAtk] = true;
+        if(isEasy) bot._easyAttackTimer = attackDelay;
+      }
     } else if(attackType === 'icup') {
       if(inMeleeRange) keys[keyAtk] = true;
       else if(absDx < 320 && absDy < 60) keys[keyAtk2] = true;
-    } else {
-      if(inAttackRange) keys[keyAtk] = true;
+      if(isEasy) bot._easyAttackTimer = attackDelay;
     }
 
-    // SECONDARY ATTACK — use occasionally at medium range
-    if(botFrame % 120 < 8 && inAttackRange && attackType !== 'grampy') {
-      keys[keyAtk2] = true;
-    }
+    // Hard bot uses secondary and abilities more
+    if(!isEasy && botFrame % 120 < 8 && inAttackRange) keys[keyAtk2] = true;
+
+    // Ability 3 — hard uses it smart, easy uses it rarely
+    const abilityCheck = isEasy ? (botFrame % abilityDelay < 3 && Math.random() < 0.3) : (botFrame % abilityDelay < 3);
+    if(abilityCheck) keys[keyR] = true;
   }
 
-  // --- GROUND SLAM if airborne and above enemy ---
-  if(!bot.onGround && bot.vy > 0 && absDx < 60 && bot.y < enemy.y - 20) {
+  // ---- GROUND SLAM ----
+  if(!bot.onGround && bot.vy > 0 && absDx < 60 && bot.y < enemy.y - 20 && Math.random() < reactionChance) {
     keys[keyDown] = true;
   }
 }
@@ -1702,13 +1725,6 @@ get controls() {
     } else {
       this.icupArmReach = 0;
     }
-    if(this.burnTimer > 0) {
-      this.burnTimer--;
-      if(this.burnTimer % 20 === 0) {
-        this.damage += 1;
-        spawnParticles(this.x+(Math.random()-0.5)*10, this.y-20-Math.random()*20, '#ff4400', 1, {type:'circle', size:4, life:12, gravity:-0.05, speed:0.8});
-      }
-    }
     if(this.attackTimer > 0) {
       this.attackTimer--;
       // keep launchUp hitbox anchored to Axel's body as he moves
@@ -1885,6 +1901,7 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
           spawnParticles(this.x, this.y - 54, '#ffffff', 8, {type:'line', size:2, life:10, gravity:0, speed:6});
           screenShake = 8;
         }
+        
 
 // GOOB — Trance first, then UFO, alternating
         if(this.char.attackType === 'goob' && (this.goobTranceCD || 0) === 0) {
@@ -2022,7 +2039,7 @@ if(ctrl.shard && !this._shardDashHeld && (this.shards||0) >= 2 && this.attackCoo
                   phase: 'appear',
                   fireballsFired: 0,
                   nextFireball: 18,
-                  totalFireballs: 14,
+                  totalFireballs: 11,
                   exitTimer: 0,
                   tailSegments: Array.from({length:18}, (_,i) => ({
                     x: fromLeft ? -320 - i*55 : canvas.width+320+i*55,
@@ -2570,6 +2587,7 @@ if(this.char.attackType === 'brawler') {
       return;
     }
 
+
    if(this.char.attackType === 'punch') {
       if(!isSecondary) {
         // DASH PUNCH — wide hitbox so it hits close AND far
@@ -2594,26 +2612,6 @@ if(this.char.attackType === 'brawler') {
           this._grampsCharging = true;
           this._grampsCharge = 0;
         }
-      }
-    } else if(this.char.attackType === 'ninja') {
-      if(!isSecondary) {
-        // KUNAI THROW — 2 kunais staggered one after the other, same line
-        this.attackCooldown = 26;
-        this.attackTimer = 10;
-        projectiles.push({
-          x: this.x + this.dir*14, y: this.y - 22,
-          vx: this.dir * 7, vy: 0,
-          owner: this, life: 30, color: '#9c27b0', big: false, kunai: true, kunaiDelay: 0
-        });
-        // second kunai spawns 10 frames later via a pending list
-        this.pendingKunai = 12;
-      } else {
-        // SHADOW FORM — ultra fast, barely visible, no attacks during
-        if(this.shadowCooldown > 0) return;
-        this.attackCooldown = 999;
-        this.attackTimer = 0;
-        this.shadowMode = 112;
-        this.shadowCooldown = 450;
       }
       if(this.char.attackType === 'brawler') {
       const ready = this.attackCooldown <= 0;
@@ -2860,6 +2858,8 @@ if(this.char.attackType === 'brawler') {
 
 checkHit(other) {
     if(!this.attackHitbox) return;
+    if(!other || other.stocks <= 0) return;
+    if((other.scribInvis || 0) > 0) return;
     if(other.hitStun > 0 && this.char.attackType !== 'icup') return;
     // IC-UP body is immune while head is detached
     if(other.icupHeadActive) return;
@@ -4331,7 +4331,7 @@ powerupSpawnTimer++;
    const others = players.filter(p => p !== pr.owner && p.stocks > 0);
     const other = (pr.shotgunPellet || pr.multiHit)
       ? (others.find(p => Math.abs(pr.x - p.x) < 30 && pr.y > p.y - 70 && pr.y < p.y + 10) || null)
-      : (others.find(p => p.hitStun === 0) || null);
+      : (others.find(p => p.hitStun === 0 && Math.abs(pr.x - p.x) < 80 && pr.y > p.y - 90 && pr.y < p.y + 20) || others.find(p => p.hitStun === 0) || null);
     // PARRY CHECK — reflect projectile if in parry window
   if(other && other.parryWindow > 0 && Math.abs(pr.x - other.x) < 30 && Math.abs(pr.y - (other.y-20)) < 36) {
       pr.vx *= -1.5;
@@ -4383,83 +4383,7 @@ if(pr.grapple && other && Math.abs(pr.x - other.x) < 28 && Math.abs(pr.y - (othe
       const wallH = 150;
       const lifeRatio = pr.life / 900;
 
-ctx.save();
-      ctx.globalAlpha = Math.min(1, lifeRatio * 4);
 
-      // shadow behind wall
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.fillRect(wx - wallW/2 + 6, wy + 6, wallW, wallH);
-
-      // outer dark border
-      ctx.fillStyle = '#1a0f00';
-      ctx.fillRect(wx - wallW/2 - 2, wy - 2, wallW + 4, wallH + 4);
-
-      // main mud body
-      ctx.fillStyle = '#6b4a1a';
-      ctx.fillRect(wx - wallW/2, wy, wallW, wallH);
-
-      // brick rows
-      const brickH = 20;
-      const numBricks = Math.ceil(wallH / brickH);
-      for(let b = 0; b < numBricks; b++) {
-        const by = wy + b * brickH;
-        const isEven = b % 2 === 0;
-        const brickColor = b % 3 === 0 ? '#8a5f2a' : b % 3 === 1 ? '#7a5020' : '#9a6a30';
-        const darkBrick = b % 3 === 0 ? '#5a3a10' : b % 3 === 1 ? '#4a2a08' : '#6a4018';
-
-        // left brick
-        ctx.fillStyle = brickColor;
-        ctx.fillRect(wx - wallW/2 + (isEven ? 0 : wallW*0.45), by + 1, wallW * (isEven ? 0.42 : 0.55), brickH - 3);
-
-        // right brick
-        ctx.fillStyle = darkBrick;
-        ctx.fillRect(wx - wallW/2 + (isEven ? wallW*0.45 : 0), by + 1, wallW * (isEven ? 0.55 : 0.42), brickH - 3);
-
-        // mortar gap between bricks
-        ctx.fillStyle = '#1a0f00';
-        ctx.fillRect(wx - wallW/2, by + brickH - 2, wallW, 3);
-        ctx.fillRect(wx - wallW/2 + (isEven ? wallW*0.43 : wallW*0.43), by, 3, brickH - 2);
-
-        // mud drip on some bricks
-        if(b % 3 === 1) {
-          ctx.fillStyle = 'rgba(80,40,0,0.7)';
-          const dripX = wx + (isEven ? -8 : 6);
-          ctx.beginPath();
-          ctx.ellipse(dripX, by + brickH + 6, 3, 8, 0, 0, Math.PI*2);
-          ctx.fill();
-        }
-      }
-
-      // top uneven mud cap
-      ctx.fillStyle = '#a28040';
-      ctx.beginPath();
-      ctx.moveTo(wx - wallW/2 - 2, wy + 10);
-      ctx.lineTo(wx - wallW/2 + 4, wy + 2);
-      ctx.lineTo(wx - wallW/2 + wallW*0.3, wy - 4);
-      ctx.lineTo(wx, wy - 8);
-      ctx.lineTo(wx + wallW*0.25, wy - 3);
-      ctx.lineTo(wx + wallW/2 - 3, wy + 3);
-      ctx.lineTo(wx + wallW/2 + 2, wy + 10);
-      ctx.lineTo(wx + wallW/2, wy + 14);
-      ctx.lineTo(wx - wallW/2, wy + 14);
-      ctx.closePath();
-      ctx.fill();
-
-      // wet sheen
-      ctx.globalAlpha = Math.min(1, lifeRatio * 4) * 0.12;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(wx - wallW/2 + 5, wy + 14, 6, wallH * 0.6);
-      ctx.fillRect(wx - wallW/2 + 16, wy + 20, 3, wallH * 0.4);
-
-      // crumble at bottom when fading
-      if(lifeRatio < 0.3) {
-        const crumble = 1 - lifeRatio / 0.3;
-        ctx.globalAlpha = crumble * 0.8;
-        ctx.fillStyle = '#6b4a1a';
-        for(let c = 0; c < 6; c++) {
-          ctx.fillRect(wx - wallW/2 + c * 8, wy + wallH - 8 + Math.sin(c)*4, 6, 8 + crumble*10);
-        }
-      }
 
       ctx.globalAlpha = Math.min(1, lifeRatio * 4) * 0.95;
       ctx.fillStyle = '#e8c84a';
@@ -4790,6 +4714,92 @@ if(pr.bullet) {
         projectiles.splice(i, 1);
         continue;
       }
+    }
+    if(pr.scribOrb) {
+      pr.orbAge = (pr.orbAge || 0) + 1;
+      // slow drift with slight gravity handled normally
+      // pulsing visual
+      const orbPulse = 0.6 + Math.sin(pr.orbAge * 0.18) * 0.3;
+      ctx.save();
+      ctx.globalAlpha = orbPulse * 0.4;
+      const og = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, 28);
+      og.addColorStop(0, '#8b3a2a'); og.addColorStop(1, 'transparent');
+      ctx.fillStyle = og;
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 28, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = orbPulse;
+      ctx.fillStyle = '#2c1b18';
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#8b3a2a';
+      ctx.beginPath(); ctx.arc(pr.x - 3, pr.y - 3, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(pr.x - 4, pr.y - 4, 2, 0, Math.PI * 2); ctx.fill();
+      // rotating claw hint
+      ctx.globalAlpha = orbPulse * 0.7;
+      ctx.strokeStyle = '#8b3a2a';
+      ctx.lineWidth = 2;
+      for(let c = 0; c < 3; c++) {
+        const ca = (c / 3) * Math.PI * 2 + pr.orbAge * 0.06;
+        ctx.beginPath();
+        ctx.moveTo(pr.x + Math.cos(ca) * 10, pr.y + Math.sin(ca) * 10);
+        ctx.lineTo(pr.x + Math.cos(ca) * 22, pr.y + Math.sin(ca) * 22);
+        ctx.stroke();
+      }
+      ctx.restore();
+      // emit dark particles
+      if(Math.random() < 0.3) {
+        spawnParticles(pr.x, pr.y, '#2c1b18', 1, {type:'star', size:4, life:12, gravity:-0.02, speed:1.5});
+      }
+      // hit enemy directly
+      const scribOrbTarget = players.find(p => p !== pr.owner && p.stocks > 0 && Math.abs(pr.x - p.x) < 26 && pr.y > p.y - 75 && pr.y < p.y + 10);
+      if(scribOrbTarget || pr.life <= 0) {
+        // EXPLODE — 8 claw slashes radiate outward
+        for(let c = 0; c < 8; c++) {
+          const ca = (c / 8) * Math.PI * 2;
+          const clawDist = 55 + Math.random() * 25;
+          particles.push({
+            x: pr.x + Math.cos(ca) * 10,
+            y: pr.y + Math.sin(ca) * 10,
+            vx: Math.cos(ca) * 9,
+            vy: Math.sin(ca) * 9,
+            life: 20, maxLife: 20,
+            color: c % 2 === 0 ? '#8b3a2a' : '#ffffff',
+            size: 5, gravity: 0,
+            type: 'line', rot: ca, rotSpeed: 0
+          });
+          // second wave slightly offset
+          particles.push({
+            x: pr.x + Math.cos(ca + 0.3) * 8,
+            y: pr.y + Math.sin(ca + 0.3) * 8,
+            vx: Math.cos(ca + 0.3) * 7,
+            vy: Math.sin(ca + 0.3) * 7,
+            life: 16, maxLife: 16,
+            color: '#2c1b18',
+            size: 3, gravity: 0,
+            type: 'line', rot: ca + 0.3, rotSpeed: 0
+          });
+        }
+        spawnParticles(pr.x, pr.y, '#8b3a2a', 20, {type:'star', size:8, life:24, gravity:0.04, speed:8});
+        spawnParticles(pr.x, pr.y, '#ffffff', 10, {type:'line', size:3, life:12, gravity:0, speed:12});
+        screenShake = 16;
+        // damage nearby enemies in blast
+        players.forEach(p => {
+          if(p === pr.owner || p.stocks <= 0) return;
+          const dist = Math.hypot(p.x - pr.x, p.y - 24 - pr.y);
+          if(dist < 100) {
+            const falloff = 1 - dist / 100;
+            const kb = (3 + p.damage * 0.09) * falloff;
+            const bdir = p.x >= pr.x ? 1 : -1;
+            p.vx = bdir * kb;
+            p.vy = -(kb * 0.8 + 2);
+            p.damage += Math.round(16 * falloff);
+            p.hitStun = Math.min(45, 18 + Math.floor(p.damage / 6));
+            spawnHitSparks(p.x, p.y - 24, bdir, '#8b3a2a');
+          }
+        });
+        projectiles.splice(i, 1);
+        continue;
+      }
+      continue;
     }
     if(pr.goobRift && pr.life <= 0) {
       pr.owner.goobRiftX = pr.x;
@@ -5474,13 +5484,21 @@ const map = getMapData()[selectedMap];
         rexDragon.fireballsFired++;
         rexDragon.nextFireball = 22;
         const shootDir = fromLeft ? 1 : -1;
-        const spreadY = ((rexDragon.fireballsFired - 1) / (rexDragon.totalFireballs - 1) - 0.5) * canvas.height * 1.2;
         const mouthX = rexDragon.x + shootDir * 200;
         const mouthY = rexDragon.y + 40;
-        const targetPY = canvas.height * 0.55 + spreadY * 0.85;
-        const targetPX = canvas.width * 0.5 + (Math.random()-0.5) * canvas.width * 0.7;
+        // Pick a living enemy to aim at, cycle through them
+        const livingEnemies = players.filter(p => p !== rexDragon.owner && p.stocks > 0);
+        let aimTarget = null;
+        if(livingEnemies.length > 0) {
+          aimTarget = livingEnemies[rexDragon.fireballsFired % livingEnemies.length];
+        }
+        // Add a small random offset so not every fireball is pixel-perfect
+        const aimX = aimTarget ? aimTarget.x + (Math.random()-0.5)*80 : canvas.width*0.5;
+        const aimY = aimTarget ? aimTarget.y - 20 + (Math.random()-0.5)*60 : canvas.height*0.55;
+        const targetPX = aimX;
+        const targetPY = aimY;
         const dist = Math.hypot(targetPX - mouthX, targetPY - mouthY);
-        const spd = 11;
+        const spd = 7;
 projectiles.push({
               x: mouthX, y: mouthY,
               vx: ((targetPX - mouthX)/dist)*spd,
